@@ -198,42 +198,37 @@ def get_control_breakpoints_from_controls(surface: GeometrySurface, total_span: 
 def interpolate_geometry_at_span(surface: GeometrySurface, span_target: float, total_span: float) -> dict:
     """
     Interpolates Xle, Yle, Zle, chord, and ainc at a given spanwise location
-    using user-defined sections from the surface.
+    based on internal AVL-section representation derived from PAVL sections.
     """
     current_span = 0.0
-    sections = surface.sections
+    for section in surface.sections:
+        local_span = float(section["Span"])
+        span_start = current_span
+        span_end = current_span + local_span
 
-    for i in range(1, len(sections)):
-        prev = sections[i - 1]
-        next = sections[i]
+        if span_start <= span_target <= span_end:
+            t = (span_target - span_start) / local_span
 
-        prev_span = current_span
-        next_span = current_span + float(next["Span"])
-        current_span = next_span
+            chord_mode = section.get("ChordMode", "Taper+Root")
+            sweep_mode = section.get("SweepMode", "LE")
+            root_c, tip_c, _ = resolve_chord_lengths(section)
+            chord = (1 - t) * root_c + t * tip_c
 
-        if prev_span <= span_target <= next_span:
-            t = (span_target - prev_span) / (next_span - prev_span)
+            xle_root = compute_xle(section, chord_mode, sweep_mode, span_start)
+            xle_tip = compute_xle(section, chord_mode, sweep_mode, span_end)
+            xle = (1 - t) * xle_root + t * xle_tip
 
-            # Resolve root and tip chords from each section
-            root_c_prev, tip_c_prev, _ = resolve_chord_lengths(prev)
-            root_c_next, tip_c_next, _ = resolve_chord_lengths(next)
+            yle_root = compute_yle(section, chord_mode, sweep_mode, span_start)
+            yle_tip = compute_yle(section, chord_mode, sweep_mode, span_end)
+            yle = (1 - t) * yle_root + t * yle_tip
 
-            chord_prev = tip_c_prev
-            chord_next = root_c_next
-            chord = (1 - t) * chord_prev + t * chord_next
+            zle_root = compute_zle(section, chord_mode, sweep_mode, span_start)
+            zle_tip = compute_zle(section, chord_mode, sweep_mode, span_end)
+            zle = (1 - t) * zle_root + t * zle_tip
 
-            # Sweep mode (assume from next section)
-            sweep_mode = next.get("SweepMode", "LE")
-            xle_prev = compute_xle(prev, "Root+Tip", sweep_mode, prev_span)
-            xle_next = compute_xle(next, "Root+Tip", sweep_mode, next_span)
-            xle = (1 - t) * xle_prev + t * xle_next
-
-            # Dihedral interpolation (assume from next section)
-            dihedral = float(next.get("Dihedral", 0))
-            yle = span_target * np.cos(np.radians(dihedral))
-            zle = span_target * np.sin(np.radians(dihedral))
-
-            ainc = compute_ainc(surface, span_target, total_span)
+            ainc_root = compute_ainc(surface, span_start, total_span)
+            ainc_tip = compute_ainc(surface, span_end, total_span)
+            ainc = (1 - t) * ainc_root + t * ainc_tip
 
             return {
                 "span": span_target,
@@ -244,7 +239,10 @@ def interpolate_geometry_at_span(surface: GeometrySurface, span_target: float, t
                 "ainc": ainc,
             }
 
+        current_span = span_end
+
     raise ValueError(f"Could not interpolate geometry at span={span_target:.4f}")
+
 
 
 def resolve_chord_lengths(section: dict) -> tuple[float, float, float]:
@@ -331,37 +329,42 @@ def assemble_augmented_sections(surface: GeometrySurface, total_span: float) -> 
 
 def write_section_block(surface, total_span):
     section_lines = []
+    seen_spans = set()
+
+    def write_section_block_line(sec):
+        section_lines.append("")
+        section_lines.append("#--------------------------------------------------------------")
+        section_lines.append("#    Xle         Yle         Zle         chord       ainc")
+        section_lines.append("SECTION")
+        section_lines.append(f"    {sec['Xle']:.5f}     {sec['Yle']:.5f}     {sec['Zle']:.5f}     {sec['chord']:.5f}     {sec['ainc']:.4f}")
+        section_lines.append("NACA")
+        section_lines.append(surface.naca_airfoil)
+        return section_lines
+
+    # === Interpolated control sections ===
+    control_sections = []
+    control_points = get_control_breakpoints_from_controls(surface, total_span)
+    for control_bp in control_points:
+        try:
+            interp = interpolate_geometry_at_span(surface, control_bp["span"], total_span)
+            interp.update({
+                "is_control": True,
+                "control": control_bp["control"]
+            })
+            control_sections.append(interp)
+        except ValueError as e:
+            print(f"[ERROR] Failed to interpolate control section: {e}")
+            continue
+
+    # === User-defined section tips ===
     current_span = 0.0
-    sections = surface.sections
-
-
-    # === Add the initial ROOT SECTION at span = 0 ===
-    root = sections[0]
-    root_chord_mode = root.get("ChordMode", "Taper+Root")
-    root_sweep_mode = root.get("SweepMode", "LE")
-    root_c = compute_chord(root, root_chord_mode, root_sweep_mode, current_span, 0)
-    x_le = 0
-    y_le = 0
-    z_le = 0
-    ainc = compute_ainc(surface, total_span, current_span)
-
-    section_lines.append("")
-    section_lines.append("#--------------------------------------------------------------")
-    section_lines.append("#    Xle         Yle         Zle         chord       ainc")
-    section_lines.append("SECTION")
-    section_lines.append(f"    {x_le:.4f}     {y_le:.4f}     {z_le:.4f}     {root_c:.4f}     {ainc:.4f}")
-    section_lines.append("NACA")
-    section_lines.append(surface.naca_airfoil)
-
-
-
-    # === Compute regular tip sections ===
-    regular_section_outputs = []
-    for i, section in enumerate(sections):
-        chord_mode = section.get("ChordMode", "Taper+Root")
-        sweep_mode = section.get("SweepMode", "LE")
+    tip_sections = []
+    for i, section in enumerate(surface.sections):
         local_span = float(section["Span"])
         current_span += local_span
+
+        chord_mode = section.get("ChordMode", "Taper+Root")
+        sweep_mode = section.get("SweepMode", "LE")
 
         xle = compute_xle(section, chord_mode, sweep_mode, current_span)
         yle = compute_yle(section, chord_mode, sweep_mode, current_span)
@@ -369,7 +372,7 @@ def write_section_block(surface, total_span):
         chord = compute_chord(section, chord_mode, sweep_mode, current_span, i + 1)
         ainc = compute_ainc(surface, current_span, total_span)
 
-        regular_section_outputs.append({
+        tip_sections.append({
             "span": current_span,
             "Xle": xle,
             "Yle": yle,
@@ -379,50 +382,42 @@ def write_section_block(surface, total_span):
             "is_control": False
         })
 
-    # === Add interpolated control sections ===
-    control_sections = []
-    control_points = get_control_breakpoints_from_controls(surface, total_span)
-    for control_bp in control_points:
-        interp = interpolate_geometry_at_span(surface, control_bp["span"], total_span)
-        interp.update({
-            "is_control": True,
-            "control": control_bp["control"]
-        })
-        control_sections.append(interp)
+    # === Root section ===
+    root = surface.sections[0]
+    root_chord_mode = root.get("ChordMode", "Taper+Root")
+    root_sweep_mode = root.get("SweepMode", "LE")
+    root_c = compute_chord(root, root_chord_mode, root_sweep_mode, 0.0, 0)
+    root_section = {
+        "span": 0.0,
+        "Xle": 0.0,
+        "Yle": 0.0,
+        "Zle": 0.0,
+        "chord": root_c,
+        "ainc": 0.0,
+        "is_control": False
+    }
 
-    # === Combine and sort ===
-    all_sections = regular_section_outputs + control_sections
+    all_sections = [root_section] + tip_sections + control_sections
     all_sections.sort(key=lambda s: s["span"])
 
-    # === Write all sections ===
     for sec in all_sections:
-        section_lines.append("")
-        section_lines.append("#--------------------------------------------------------------")
-        section_lines.append("#    Xle         Yle         Zle         chord       ainc")
-        section_lines.append("SECTION")
-        section_lines.append(f"    {sec['Xle']:.5f}     {sec['Yle']:.5f}     {sec['Zle']:.5f}     {sec['chord']:.5f}     {sec['ainc']:.4f}")
-        section_lines.append("NACA")
-        section_lines.append(surface.naca_airfoil)
-
-        labels = ["Hinge Loc", "Inboard Loc", "Outboard Loc"]
+        if sec["span"] in seen_spans:
+            continue
+        seen_spans.add(sec["span"])
+        write_section_block_line(sec)
 
         if sec.get("is_control"):
-            print(f"Writing control surface: {sec['control']['name']} at span {sec['span']:.2f}")
-            print("Control points detected:", get_control_breakpoints_from_controls(surface, total_span))
             ctrl = sec["control"]
-            control_name = ctrl["name"]
+            print(f"Writing control surface: {ctrl['name']} at span {sec['span']:.2f}")
             xhinge = ctrl["hinge"]
             ctrl_type = ctrl["type"]
-
             hinge_vec = "0.0 0.0 1.0" if ctrl_type.lower() == "rudder" else "0.0 1.0 0.0"
             signdup = -1.0 if ctrl_type.lower() == "aileron" else 1.0
-
-
-
             section_lines.append("CONTROL")
-            section_lines.append(f"    {control_name}     1.0     {xhinge:.3f}     {hinge_vec}     {signdup:.1f}")
+            section_lines.append(f"    {ctrl['name']}     1.0     {xhinge:.3f}     {hinge_vec}     {signdup:.1f}")
 
     return section_lines
+
 
 
 
