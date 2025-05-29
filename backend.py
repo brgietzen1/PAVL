@@ -414,7 +414,7 @@ def write_section_block(surface, total_span):
             hinge_vec = "0.0 0.0 1.0" if ctrl_type.lower() == "rudder" else "0.0 1.0 0.0"
             signdup = -1.0 if ctrl_type.lower() == "aileron" else 1.0
             section_lines.append("CONTROL")
-            section_lines.append(f"    {ctrl['name']}     1.0     {xhinge:.3f}     {hinge_vec}     {signdup:.1f}")
+            section_lines.append(f"    {ctrl['type']}     1.0     {xhinge:.3f}     {hinge_vec}     {signdup:.1f}")
 
     return section_lines
 
@@ -500,14 +500,14 @@ def write_run_file(jobname: str, sim_case, filepath: str):
 
     # Flap
     if sim_case.flap_mode == "Deflection":
-        lines.append(f" flap         ->  flap        =   {sim_case.flap_val:<8.4f}")
+        lines.append(f" Flap         ->  Flap        =   {sim_case.flap_val:<8.4f}")
 
 
     # Elevator
     if sim_case.elevator_mode == "Deflection":
-        lines.append(f" elevator     ->  elevator    =   {sim_case.elevator_val:<8.4f}")
+        lines.append(f" Elevator     ->  Elevator    =   {sim_case.elevator_val:<8.4f}")
     elif sim_case.elevator_mode == "Cm":
-        lines.append(f" elevator     ->  Cm pitchmom =   {sim_case.elevator_val:<8.4f}")
+        lines.append(f" Elevator     ->  Cm pitchmom =   {sim_case.elevator_val:<8.4f}")
 
 
     lines.append("")
