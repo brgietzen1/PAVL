@@ -67,7 +67,7 @@ def run_avl(jobname: str, results_dir: str, avl_exe_path: str = AVL_EXECUTABLE_P
         if os.path.exists(st_file):
             with open(st_file, "r") as f:
                 lines = f.readlines()
-                # Only keep the lines after the stability derivatives header
+                
                 start_idx = 0
                 for i, line in enumerate(lines):
                     if "Stability-axis derivatives" in line:
