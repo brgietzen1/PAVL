@@ -226,12 +226,19 @@ class GeometryPropertyEditor:
                 prev_tip = tip_c
                 draft["Sections"].append(section_vals)
 
-            for c in self.controls:
+            for j,c in enumerate(self.controls):
+
+                required_keys = ["Hinge Loc", "Inboard Loc", "Outboard Loc"]
+                if not all(k in c["entries"] for k in required_keys):
+                    print(f"[ERROR] Control {j} is missing keys: {c['entries'].keys()}")
+                    continue    
+
                 control_vals = {k: c["entries"][k].get() for k in c["entries"]}
                 control_type = c["type"].get()
                 if any(not v.strip() for v in control_vals.values()) or not control_type:
                     raise ValueError("All control surface fields must be filled")
                 control_vals["Control Type"] = control_type
+                control_vals["Control Name"] = f"{self.name}_{control_type.lower()}_{j + 1}"
                 draft["Controls"].append(control_vals)
 
             property_drafts[self.name] = draft
@@ -300,10 +307,18 @@ class GeometryPropertyEditor:
             self.update_sweep_states(sec_radios, self.sections[-1]["entries"])
 
         for con in values.get("Controls", []):
+            # Check before adding anything to GUI
+            if not all(k in con for k in ["Hinge Loc", "Inboard Loc", "Outboard Loc"]):
+                print(f"[Warning] Skipping malformed control: {con}")
+                continue
+
             self.add_control_surface()
             self.controls[-1]["type"].set(con.get("Control Type", ""))
             for k in ["Hinge Loc", "Inboard Loc", "Outboard Loc"]:
+                self.controls[-1]["entries"][k].delete(0, tk.END)
                 self.controls[-1]["entries"][k].insert(0, con.get(k, ""))
+
+
 
     def update_summary_labels(self):
         total_span = 0.0
