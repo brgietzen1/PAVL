@@ -1,10 +1,5 @@
 # File: input_windows.py
 
-import tkinter as tk
-from tkinter import ttk, messagebox
-from models import property_drafts, GeometrySurface, aircraft
-import math
-
 # New GeometryPropertyEditor class
 import tkinter as tk
 from tkinter import ttk, messagebox
